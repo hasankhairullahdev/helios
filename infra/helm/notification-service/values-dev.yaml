@@ -1,0 +1,30 @@
+image:
+  tag: ""
+
+replicaCount: 1
+
+config:
+  aspnetEnvironment: "Development"
+
+probes:
+  liveness:
+    initialDelaySeconds: 15
+  readiness:
+    initialDelaySeconds: 15
+
+resources:
+  requests:
+    cpu: "25m"
+    memory: "32Mi"
+  limits:
+    cpu: "300m"
+    memory: "128Mi"
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+serviceMonitor:
+  enabled: true

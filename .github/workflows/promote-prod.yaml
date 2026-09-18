@@ -1,0 +1,62 @@
+name: Promote to Production
+
+# Manual trigger + GitHub Environment protection rule.
+# Di GitHub repo settings → Environments → "production" → tambahkan
+# required reviewers. Workflow ini tidak akan jalan sampai ada approval.
+on:
+  workflow_dispatch:
+    inputs:
+      sha_tag:
+        description: "Image SHA tag to promote (e.g. abc1234). Leave empty to use latest staging tag."
+        required: false
+        type: string
+
+jobs:
+  promote:
+    name: Promote to Production
+    runs-on: ubuntu-latest
+    # "production" environment — GitHub akan enforce protection rules di sini
+    # (manual approval dari reviewer sebelum job ini boleh jalan)
+    environment: production
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Kalau SHA tidak di-input manual, ambil dari values-staging.yaml
+      # (promote "apa yang sudah proven di staging")
+      - name: Resolve SHA tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.sha_tag }}" ]; then
+            echo "tag=${{ inputs.sha_tag }}" >> $GITHUB_OUTPUT
+          else
+            TAG=$(grep 'tag:' infra/helm/task-service/values-staging.yaml | head -1 | sed 's/.*tag: "\(.*\)"/\1/')
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "Promoting current staging tag: $TAG"
+          fi
+
+      - name: Update task-service values-prod.yaml
+        run: |
+          sed -i "s/tag: .*/tag: \"${{ steps.tag.outputs.tag }}\"/" \
+            infra/helm/task-service/values-prod.yaml
+
+      - name: Update notification-service values-prod.yaml
+        run: |
+          sed -i "s/tag: .*/tag: \"${{ steps.tag.outputs.tag }}\"/" \
+            infra/helm/notification-service/values-prod.yaml
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add infra/helm/task-service/values-prod.yaml
+          git add infra/helm/notification-service/values-prod.yaml
+          git commit -m "chore: promote ${{ steps.tag.outputs.tag }} to production [skip ci]" 
+          git push

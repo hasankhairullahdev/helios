@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: task-service-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hasankhairullahdev/helios
+    targetRevision: HEAD
+    path: infra/helm/task-service
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: helios-prod
+  syncPolicy:
+    # PROD: manual sync — sama seperti staging, tapi lebih deliberate.
+    # Promote ke prod sudah lewat GitHub Actions approval gate.
+    # ArgoCD sync adalah last step — manusia yang click atau jalankan:
+    # argocd app sync task-service-prod
+    syncOptions:
+      - CreateNamespace=true

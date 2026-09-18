@@ -1,0 +1,42 @@
+# values-dev.yaml — overrides untuk environment DEV
+# Prioritas: nilai di sini menimpa values.yaml
+
+image:
+  tag: ""  # Di-bump otomatis oleh CI job bump-dev-values
+
+replicaCount: 1  # Dev: 1 replica cukup, hemat resource
+
+config:
+  aspnetEnvironment: "Development"
+
+secrets:
+  # Di dev, connection string boleh di sini karena bukan production data.
+  # Di prod/staging, nilai ini dari External Secrets Operator.
+  postgresConnectionString: "Host=postgres;Database=tasks;Username=app;Password=secret"
+
+# Dev: probe lebih toleran — container mungkin lambat start di local cluster
+probes:
+  liveness:
+    initialDelaySeconds: 15
+  readiness:
+    initialDelaySeconds: 20
+
+# Dev: resource loose — tidak perlu ketat
+resources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+# Dev: tidak perlu HPA dan PDB
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+# Dev: aktifkan ServiceMonitor supaya bisa test observability dari awal
+serviceMonitor:
+  enabled: true

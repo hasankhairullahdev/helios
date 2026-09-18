@@ -1,0 +1,41 @@
+image:
+  repository: ghcr.io/hasankhairullahdev/notification-service
+  tag: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+config:
+  rabbitmqHost: "rabbitmq"
+  aspnetEnvironment: "Production"
+  otelEndpoint: "http://otel-collector:4317"
+
+probes:
+  liveness:
+    initialDelaySeconds: 10
+  readiness:
+    initialDelaySeconds: 10
+
+resources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "300m"
+    memory: "128Mi"
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+serviceMonitor:
+  enabled: false
+  prometheusRelease: kube-prometheus-stack
+  interval: 30s

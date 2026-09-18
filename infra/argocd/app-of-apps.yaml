@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: helios-app-of-apps
+  namespace: argocd
+  # Finalizer ini penting: kalau Application ini dihapus dari ArgoCD,
+  # semua child Application yang dia manage juga ikut dihapus (cascade delete).
+  # Ini "clean teardown" — tidak ada resource orphan tertinggal di cluster.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hasankhairullahdev/helios  # Ganti dengan repo URL kamu
+    targetRevision: HEAD
+    # Point ke folder yang berisi semua child Application manifests
+    path: infra/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc  # In-cluster deployment
+    namespace: argocd  # Child Applications di-create di namespace argocd
+  syncPolicy:
+    # Root app-of-apps juga automated — kalau kita tambah child Application
+    # baru di folder apps/, ArgoCD langsung pickup tanpa manual sync.
+    automated:
+      selfHeal: true   # Kalau ada yang manually edit di cluster, ArgoCD revert
+      prune: true      # Kalau file dihapus dari Git, resource di cluster juga dihapus

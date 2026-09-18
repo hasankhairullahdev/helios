@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "task-service.fullname" . }}-config
+  labels:
+    {{- include "task-service.labels" . | nindent 4 }}
+data:
+  # Non-sensitive config — aman di ConfigMap
+  # Sensitive config (password, connection string) ada di Secret terpisah
+  RABBITMQ_HOST: {{ .Values.config.rabbitmqHost | quote }}
+  ASPNETCORE_ENVIRONMENT: {{ .Values.config.aspnetEnvironment | quote }}
+  GIT_SHA: {{ .Values.image.tag | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}

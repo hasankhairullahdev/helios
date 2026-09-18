@@ -1,0 +1,20 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "task-service.fullname" . }}
+  labels:
+    {{- include "task-service.labels" . | nindent 4 }}
+    # Label ini dibutuhkan oleh Prometheus Operator untuk discover ServiceMonitor
+    release: {{ .Values.serviceMonitor.prometheusRelease }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "task-service.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      # Scrape timeout harus lebih kecil dari interval
+      scrapeTimeout: 10s
+{{- end }}

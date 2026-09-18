@@ -1,0 +1,206 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+# Prevent multiple CI runs for the same branch/PR from running concurrently.
+# Kalau ada push baru saat CI masih jalan, CI lama di-cancel otomatis.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # github.repository = "org/repo" — image name otomatis ikut repo name
+  IMAGE_PREFIX: ghcr.io/hasankhairullahdev
+
+jobs:
+  # ============================================================
+  # JOB 1: Build & Test
+  # Matrix strategy: kedua service build PARALEL, bukan sequential.
+  # Kalau satu gagal, yang lain tetap jalan sampai selesai (fail-fast: false
+  # bisa ditambah kalau mau, tapi default fail-fast: true lebih efisien).
+  # ============================================================
+  build-and-test:
+    name: Build & Test (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [task-service, notification-service]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.x"
+
+      # Cache NuGet packages — key berdasarkan lockfile hash.
+      # Kalau lockfile tidak berubah, packages tidak perlu di-download ulang.
+      # Ini bisa hemat 30-60 detik per job.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ matrix.service }}-${{ hashFiles(format('services/{0}/*.csproj', matrix.service)) }}
+          restore-keys: |
+            nuget-${{ matrix.service }}-
+
+      - name: Restore dependencies
+        run: dotnet restore services/${{ matrix.service }} --locked-mode
+
+      - name: Build
+        run: dotnet build services/${{ matrix.service }} -c Release --no-restore
+
+      - name: Test
+        run: dotnet test services/${{ matrix.service }} -c Release --no-build --logger "trx;LogFileName=test-results.trx"
+
+      # Publish test results sebagai check annotation di PR
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Test Results (${{ matrix.service }})
+          path: "services/${{ matrix.service }}/**/*.trx"
+          reporter: dotnet-trx
+
+  # ============================================================
+  # JOB 2: Security Scan (Trivy)
+  # Scan filesystem (source + dependencies) SEBELUM build image.
+  # Ini "fast fail" — tidak perlu build image dulu untuk detect vuln di deps.
+  # ============================================================
+  trivy-scan:
+    name: Trivy Scan (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    strategy:
+      matrix:
+        service: [task-service, notification-service]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          scan-type: "fs"
+          scan-ref: "services/${{ matrix.service }}"
+          # Fail pipeline jika ada HIGH atau CRITICAL vulnerability
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
+          # Format table untuk output yang mudah dibaca di CI log
+          format: "table"
+          # Ignore unfixed vulns — tidak fair menghentikan pipeline untuk vuln
+          # yang belum ada patchnya dari upstream
+          ignore-unfixed: true
+
+  # ============================================================
+  # JOB 3: Build & Push Image ke GHCR
+  # Hanya jalan di branch main setelah build+test+scan pass.
+  # PR tidak push image — hanya validate bahwa image bisa di-build.
+  # ============================================================
+  build-push-image:
+    name: Build & Push Image (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: trivy-scan
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    strategy:
+      matrix:
+        service: [task-service, notification-service]
+
+    # Butuh permission untuk push ke GHCR menggunakan GITHUB_TOKEN
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Short SHA — 7 karakter, cukup unik untuk tagging image
+      - name: Set short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN otomatis tersedia — tidak perlu setup secret manual
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Setup Docker Buildx untuk layer caching yang lebih efisien
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          push: true
+          build-args: |
+            GIT_SHA=${{ steps.sha.outputs.short }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ steps.sha.outputs.short }}
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.ref_name }}
+          # Docker layer cache — build ulang lebih cepat kalau layer tidak berubah
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # ============================================================
+  # JOB 4: Bump image tag di values-dev.yaml
+  # Ini adalah "GitOps write step" — CI commit perubahan ke Git,
+  # ArgoCD yang akan apply ke cluster (CI tidak pernah kubectl apply).
+  # ============================================================
+  bump-dev-values:
+    name: Bump dev image tags
+    runs-on: ubuntu-latest
+    needs: build-push-image
+
+    permissions:
+      contents: write  # butuh write permission untuk push commit
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Fetch semua branch supaya bisa push ke main
+          fetch-depth: 0
+          # Pakai token dengan write permission
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      # Update image.tag di values-dev.yaml untuk kedua service.
+      # Menggunakan sed karena lebih ringan dari install yq/helm.
+      # Format yang di-expect di values-dev.yaml: `tag: ""`
+      - name: Update task-service values-dev.yaml
+        run: |
+          sed -i "s/tag: .*/tag: \"${{ steps.sha.outputs.short }}\"/" \
+            infra/helm/task-service/values-dev.yaml
+
+      - name: Update notification-service values-dev.yaml
+        run: |
+          sed -i "s/tag: .*/tag: \"${{ steps.sha.outputs.short }}\"/" \
+            infra/helm/notification-service/values-dev.yaml
+
+      # Commit dan push perubahan values file.
+      # [skip ci] di commit message penting — mencegah CI trigger lagi
+      # secara rekursif karena commit ini push ke main.
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add infra/helm/task-service/values-dev.yaml
+          git add infra/helm/notification-service/values-dev.yaml
+          git commit -m "chore: bump dev image tags to ${{ steps.sha.outputs.short }} [skip ci]"
+          git push

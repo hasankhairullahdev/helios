@@ -1,0 +1,16 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "notification-service.fullname" . }}
+  labels:
+    {{- include "notification-service.labels" . | nindent 4 }}
+spec:
+  # minAvailable: 1 = selalu ada minimal 1 pod yang running saat disruption.
+  # Ini mencegah downtime saat node drain / cluster upgrade.
+  # Untuk prod dengan 3 replicas, ini artinya max 2 pod bisa down bersamaan.
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "notification-service.selectorLabels" . | nindent 6 }}
+{{- end }}

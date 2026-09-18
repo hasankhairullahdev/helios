@@ -1,0 +1,30 @@
+﻿# .NET build outputs
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Environment & secrets — JANGAN PERNAH commit file ini
+.env
+.env.*
+*.env
+appsettings.Production.json
+appsettings.*.json.local
+
+# Docker
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rider / JetBrains
+.idea/
+
+# VS Code
+.vscode/
+
+# Helm
+infra/helm/**/charts/
+infra/helm/**/*.lock

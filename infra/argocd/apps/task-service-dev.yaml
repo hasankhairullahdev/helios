@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: task-service-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hasankhairullahdev/helios
+    targetRevision: HEAD
+    path: infra/helm/task-service
+    helm:
+      # Merge values.yaml (defaults) dengan values-dev.yaml (overrides)
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: helios-dev
+  syncPolicy:
+    # DEV: automated sync — CI bump values-dev.yaml → ArgoCD langsung deploy
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      # Buat namespace kalau belum ada — tidak perlu kubectl create namespace manual
+      - CreateNamespace=true

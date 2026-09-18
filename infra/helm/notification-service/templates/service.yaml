@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "notification-service.fullname" . }}
+  labels:
+    {{- include "notification-service.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  # ClusterIP = hanya accessible dari dalam cluster.
+  # Ingress / API Gateway yang akan expose ke luar — kita tidak butuh itu di project ini.
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "notification-service.selectorLabels" . | nindent 4 }}

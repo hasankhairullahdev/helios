@@ -1,0 +1,44 @@
+# values-staging.yaml — overrides untuk environment STAGING
+# Di-promote manual via GitHub Actions workflow_dispatch
+
+image:
+  tag: ""  # Di-set oleh promote-staging.yaml workflow
+
+replicaCount: 2  # Staging: 2 replica untuk test HA behavior
+
+config:
+  aspnetEnvironment: "Staging"
+
+secrets:
+  # Staging: placeholder — di production pakai External Secrets Operator
+  postgresConnectionString: ""
+
+probes:
+  liveness:
+    initialDelaySeconds: 10
+  readiness:
+    initialDelaySeconds: 15
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+# Staging: HPA aktif untuk test auto-scaling behavior
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Staging: PDB aktif — jangan sampai semua 2 replica down saat node drain
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+serviceMonitor:
+  enabled: true

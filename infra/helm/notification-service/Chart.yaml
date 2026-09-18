@@ -1,0 +1,6 @@
+apiVersion: v2
+name: notification-service
+description: Event-driven notification service for the Helios GitOps platform
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,46 @@
+# values-prod.yaml — overrides untuk environment PRODUCTION
+# Di-promote manual + reviewer approval via GitHub Actions
+
+image:
+  tag: ""  # Di-set oleh promote-prod.yaml workflow (butuh approval)
+
+replicaCount: 3  # Prod: 3 replica minimum untuk HA
+
+config:
+  aspnetEnvironment: "Production"
+
+secrets:
+  # Prod: WAJIB kosong — External Secrets Operator yang inject nilai ini
+  # dari KMS/Vault. JANGAN pernah isi di sini.
+  postgresConnectionString: ""
+
+probes:
+  liveness:
+    initialDelaySeconds: 10
+  readiness:
+    initialDelaySeconds: 15
+
+# Prod: resource ketat dan tuned berdasarkan profiling
+resources:
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+  limits:
+    cpu: "1000m"
+    memory: "512Mi"
+
+# Prod: HPA agresif
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 60
+  targetMemoryUtilizationPercentage: 75
+
+# Prod: PDB ketat — minimal 2 pod harus selalu running
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+serviceMonitor:
+  enabled: true

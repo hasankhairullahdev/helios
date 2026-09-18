@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: task-service-staging
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hasankhairullahdev/helios
+    targetRevision: HEAD
+    path: infra/helm/task-service
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-staging.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: helios-staging
+  syncPolicy:
+    # STAGING: manual sync — engineer yang memutuskan kapan promote.
+    # ArgoCD akan show "OutOfSync" di UI kalau values-staging.yaml berubah,
+    # tapi tidak akan auto-deploy sampai di-click Sync atau pakai argocd CLI.
+    syncOptions:
+      - CreateNamespace=true
