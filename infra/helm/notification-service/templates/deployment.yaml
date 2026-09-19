@@ -1,3 +1,92 @@
+{{- if .Values.rollout.enabled }}
+# ============================================================
+# STAGING / PROD: Argo Rollouts — Blue-Green Strategy
+# ============================================================
+# Blue-Green: deploy versi baru (green) secara penuh di samping versi lama (blue).
+# Traffic tetap 100% ke blue sampai engineer verify green healthy → cutover.
+# Rollback instan: tinggal switch traffic balik ke blue (ReplicaSet masih ada).
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ include "notification-service.fullname" . }}
+  labels:
+    {{- include "notification-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "notification-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "notification-service.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: notification-service
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "notification-service.fullname" . }}-config
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+  strategy:
+    blueGreen:
+      # activeService: menerima 100% production traffic (blue)
+      activeService: {{ include "notification-service.fullname" . }}-active
+      # previewService: versi baru yang bisa di-test sebelum cutover (green)
+      previewService: {{ include "notification-service.fullname" . }}-preview
+      # autoPromotionEnabled: false = engineer harus manual promote setelah verify
+      # Bisa diubah true untuk fully automated blue-green
+      autoPromotionEnabled: {{ .Values.rollout.autoPromotionEnabled }}
+      # Setelah cutover, berapa lama blue ReplicaSet dipertahankan untuk rollback
+      scaleDownDelaySeconds: 30
+
+{{- else }}
+# ============================================================
+# DEV: Plain Deployment
+# ============================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -63,3 +152,4 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+{{- end }}

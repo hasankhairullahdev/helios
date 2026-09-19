@@ -39,3 +39,7 @@ serviceMonitor:
   enabled: false
   prometheusRelease: kube-prometheus-stack
   interval: 30s
+
+rollout:
+  enabled: false
+  autoPromotionEnabled: false

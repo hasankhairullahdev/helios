@@ -27,3 +27,8 @@ podDisruptionBudget:
 
 serviceMonitor:
   enabled: true
+
+# Blue-green untuk prod
+rollout:
+  enabled: true
+  autoPromotionEnabled: false

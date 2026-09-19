@@ -1,13 +1,16 @@
-apiVersion: apps/v1
-kind: Deployment
+{{- if .Values.rollout.enabled }}
+# ============================================================
+# STAGING / PROD: Argo Rollouts — Canary Strategy
+# ============================================================
+# Rollout menggantikan Deployment sepenuhnya. API-nya compatible —
+# selector, template, dan resources sama persis dengan Deployment.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
 metadata:
   name: {{ include "task-service.fullname" . }}
   labels:
     {{- include "task-service.labels" . | nindent 4 }}
 spec:
-  # Replicas dikontrol dari values per environment.
-  # Kalau HPA aktif (staging/prod), nilai ini adalah initial replicas —
-  # HPA yang akan scale up/down setelahnya.
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
@@ -17,11 +20,8 @@ spec:
       labels:
         {{- include "task-service.selectorLabels" . | nindent 8 }}
       annotations:
-        # Force pod restart saat ConfigMap berubah — tanpa ini perubahan
-        # env var dari ConfigMap tidak akan ter-apply ke pod yang sudah jalan
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
-      # Non-root security context — sesuai security rules
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -38,16 +38,11 @@ spec:
             - configMapRef:
                 name: {{ include "task-service.fullname" . }}-config
           env:
-            # Secret database password dari Kubernetes Secret — BUKAN dari ConfigMap.
-            # ConfigMap untuk non-sensitive config, Secret untuk credentials.
             - name: ConnectionStrings__Postgres
               valueFrom:
                 secretKeyRef:
                   name: {{ include "task-service.fullname" . }}-secret
                   key: postgres-connection-string
-
-          # Liveness probe — Kubernetes restart pod kalau ini gagal
-          # Path /healthz TIDAK cek DB — cukup "apakah proses masih hidup?"
           livenessProbe:
             httpGet:
               path: /healthz
@@ -55,9 +50,6 @@ spec:
             initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
             periodSeconds: 10
             failureThreshold: 3
-
-          # Readiness probe — Kubernetes remove pod dari load balancer kalau ini gagal
-          # Path /readyz CEK koneksi DB — pod tidak dapat traffic sampai DB siap
           readinessProbe:
             httpGet:
               path: /readyz
@@ -65,11 +57,6 @@ spec:
             initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
             periodSeconds: 5
             failureThreshold: 3
-
-          # Resource requests dan limits — WAJIB ada, tidak ada container tanpa ini.
-          # requests: minimum yang dijamin tersedia untuk pod ini
-          # limits: maximum yang boleh dipakai — kalau exceed, pod di-throttle (CPU)
-          #         atau di-OOMKill (memory)
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
@@ -77,20 +64,126 @@ spec:
             limits:
               cpu: {{ .Values.resources.limits.cpu }}
               memory: {{ .Values.resources.limits.memory }}
-
-          # Read-only root filesystem — container tidak bisa tulis ke filesystem
-          # kecuali di mount points yang eksplisit. Ini hardening security.
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-
-          # ASP.NET butuh temp directory untuk write — mount sebagai emptyDir
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-
       volumes:
         - name: tmp
           emptyDir: {}
+
+  strategy:
+    canary:
+      # Service yang di-split trafficnya
+      canaryService: {{ include "task-service.fullname" . }}-canary
+      stableService: {{ include "task-service.fullname" . }}-stable
+      steps:
+        # Step 1: kirim 10% traffic ke canary, pause 2 menit
+        - setWeight: 10
+        - pause: {duration: 2m}
+        # Step 2: analisa error rate + latency canary pods
+        - analysis:
+            templates:
+              - templateName: success-rate-and-latency
+            args:
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+              - name: service-name
+                value: task-service
+        # Step 3: naikkan ke 50%, pause lagi
+        - setWeight: 50
+        - pause: {duration: 2m}
+        # Step 4: analisa lagi sebelum full rollout
+        - analysis:
+            templates:
+              - templateName: success-rate-and-latency
+            args:
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+              - name: service-name
+                value: task-service
+        # Step 5: full rollout — semua traffic ke versi baru
+        - setWeight: 100
+
+{{- else }}
+# ============================================================
+# DEV: Plain Deployment (tidak perlu canary di dev)
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "task-service.fullname" . }}
+  labels:
+    {{- include "task-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "task-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "task-service.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: task-service
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "task-service.fullname" . }}-config
+          env:
+            - name: ConnectionStrings__Postgres
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "task-service.fullname" . }}-secret
+                  key: postgres-connection-string
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

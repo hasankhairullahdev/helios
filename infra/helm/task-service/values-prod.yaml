@@ -44,3 +44,7 @@ podDisruptionBudget:
 
 serviceMonitor:
   enabled: true
+
+# Prod: aktifkan Argo Rollouts canary
+rollout:
+  enabled: true

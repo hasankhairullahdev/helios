@@ -1,0 +1,74 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate-and-latency
+  # AnalysisTemplate di namespace yang sama dengan Rollout-nya.
+  # Kita buat per-namespace (staging, prod) — ArgoCD akan apply ini
+  # bersamaan dengan Rollout resource.
+spec:
+  args:
+    # rollouts-pod-template-hash di-inject otomatis oleh Argo Rollouts
+    # ke setiap pod — ini yang membedakan pod canary vs stable di Prometheus.
+    - name: canary-hash
+    - name: service-name
+
+  metrics:
+    # ============================================================
+    # METRIC 1: HTTP Error Rate
+    # Fail kalau error rate canary pods > 1% selama window analisa.
+    # ============================================================
+    - name: error-rate
+      # Interval: query Prometheus setiap 30 detik
+      interval: 30s
+      # successCondition: hasil query harus <= 0.01 (1%) supaya pass
+      successCondition: result[0] <= 0.01
+      # failureLimit: boleh gagal maksimal 2x sebelum analysis di-abort
+      failureLimit: 2
+      provider:
+        prometheus:
+          # Prometheus in-cluster — di-install di Phase 7
+          address: http://prometheus-kube-prometheus-prometheus.monitoring:9090
+          query: |
+            sum(
+              rate(
+                http_server_request_duration_seconds_count{
+                  job="{{ args.service-name }}",
+                  http_response_status_code=~"5..",
+                  rollouts_pod_template_hash="{{ args.canary-hash }}"
+                }[2m]
+              )
+            )
+            /
+            sum(
+              rate(
+                http_server_request_duration_seconds_count{
+                  job="{{ args.service-name }}",
+                  rollouts_pod_template_hash="{{ args.canary-hash }}"
+                }[2m]
+              )
+            )
+
+    # ============================================================
+    # METRIC 2: p95 Latency
+    # Fail kalau p95 response time canary pods > 500ms.
+    # ============================================================
+    - name: p95-latency
+      interval: 30s
+      # successCondition: p95 latency harus <= 0.5 detik (500ms)
+      successCondition: result[0] <= 0.5
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus-kube-prometheus-prometheus.monitoring:9090
+          query: |
+            histogram_quantile(
+              0.95,
+              sum(
+                rate(
+                  http_server_request_duration_seconds_bucket{
+                    job="{{ args.service-name }}",
+                    rollouts_pod_template_hash="{{ args.canary-hash }}"
+                  }[2m]
+                )
+              ) by (le)
+            )

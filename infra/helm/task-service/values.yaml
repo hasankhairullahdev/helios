@@ -51,3 +51,8 @@ serviceMonitor:
   enabled: false
   prometheusRelease: kube-prometheus-stack
   interval: 30s
+
+# rollout.enabled: false = pakai Deployment biasa (dev)
+# rollout.enabled: true  = pakai Argo Rollouts (staging/prod)
+rollout:
+  enabled: false
