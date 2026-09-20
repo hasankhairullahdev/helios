@@ -1,0 +1,53 @@
+# values untuk kube-prometheus-stack
+# Install: helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#   -n monitoring --create-namespace -f infra/observability/prometheus-values.yaml
+
+grafana:
+  enabled: true
+  adminPassword: "helios-grafana"  # ganti di production!
+  grafana.ini:
+    server:
+      root_url: "http://localhost:3000"
+
+  # Tambah datasource OTel Collector sebagai sumber metrics tambahan
+  additionalDataSources:
+    - name: OTel-Collector
+      type: prometheus
+      url: http://otel-collector.monitoring:8889
+      isDefault: false
+
+prometheus:
+  prometheusSpec:
+    # Scrape semua ServiceMonitor di semua namespace
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+
+    # Scrape OTel Collector metrics endpoint
+    additionalScrapeConfigs:
+      - job_name: otel-collector
+        static_configs:
+          - targets: ["otel-collector.monitoring:8889"]
+
+    # Retention: simpan data 15 hari
+    retention: 15d
+    retentionSize: "5GB"
+
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        cpu: "1000m"
+        memory: "1Gi"
+
+alertmanager:
+  enabled: true
+
+# node-exporter: metrics dari tiap node (CPU, memory, disk)
+nodeExporter:
+  enabled: true
+
+# kube-state-metrics: metrics dari Kubernetes objects
+kubeStateMetrics:
+  enabled: true

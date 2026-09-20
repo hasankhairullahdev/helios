@@ -1,0 +1,152 @@
+{
+  "title": "Helios — Canary vs Stable",
+  "uid": "helios-canary-vs-stable",
+  "tags": ["helios", "canary", "rollout"],
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "annotations": {
+    "list": [
+      {
+        "name": "Deployments",
+        "datasource": "Prometheus",
+        "expr": "changes(kube_deployment_status_replicas_updated{namespace=~\"helios-staging|helios-prod\"}[2m]) > 0",
+        "titleFormat": "Deploy event",
+        "iconColor": "blue"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "type": "custom",
+        "options": [
+          { "text": "helios-staging", "value": "helios-staging" },
+          { "text": "helios-prod", "value": "helios-prod" }
+        ],
+        "current": { "text": "helios-staging", "value": "helios-staging" },
+        "label": "Namespace"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "🟢 Stable — Request Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "green", "mode": "fixed" } } },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_request_duration_seconds_count{job=\"task-service\", namespace=\"$namespace\", rollouts_pod_template_hash=~\".*\"}[1m])) by (rollouts_pod_template_hash) - on(rollouts_pod_template_hash) group_left() (sum(rate(http_server_request_duration_seconds_count{job=\"task-service\", namespace=\"$namespace\"}[1m])) by (rollouts_pod_template_hash) * on(rollouts_pod_template_hash) group_left() label_replace(kube_replicaset_labels{label_rollouts_pod_template_hash!=\"\"}, \"rollouts_pod_template_hash\", \"$1\", \"label_rollouts_pod_template_hash\", \"(.*)\"))",
+          "legendFormat": "stable req/s"
+        }
+      ]
+    },
+    {
+      "title": "🟡 Canary — Request Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "yellow", "mode": "fixed" } } },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_request_duration_seconds_count{job=\"task-service\", namespace=\"$namespace\"}[1m])) by (rollouts_pod_template_hash)",
+          "legendFormat": "{{rollouts_pod_template_hash}} req/s"
+        }
+      ]
+    },
+    {
+      "title": "🟢 Stable — Error Rate %",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_request_duration_seconds_count{job=\"task-service\", namespace=\"$namespace\", http_response_status_code=~\"5..\"}[2m])) by (rollouts_pod_template_hash) / sum(rate(http_server_request_duration_seconds_count{job=\"task-service\", namespace=\"$namespace\"}[2m])) by (rollouts_pod_template_hash) * 100",
+          "legendFormat": "{{rollouts_pod_template_hash}} error %"
+        }
+      ]
+    },
+    {
+      "title": "🟡 Canary — p95 Latency (ms)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 300 },
+              { "color": "red", "value": 500 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket{job=\"task-service\", namespace=\"$namespace\"}[2m])) by (le, rollouts_pod_template_hash)) * 1000",
+          "legendFormat": "{{rollouts_pod_template_hash}} p95ms"
+        }
+      ]
+    },
+    {
+      "title": "Traffic Weight (Canary %)",
+      "description": "Persentase traffic yang dikirim ke canary pods — berubah sesuai rollout steps",
+      "type": "gauge",
+      "gridPos": { "x": 0, "y": 16, "w": 8, "h": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0, "max": 100,
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 10 },
+              { "color": "orange", "value": 50 },
+              { "color": "red", "value": 100 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_request_duration_seconds_count{job=\"task-service\", namespace=\"$namespace\", rollouts_pod_template_hash=~\"latest.*\"}[1m])) / sum(rate(http_server_request_duration_seconds_count{job=\"task-service\", namespace=\"$namespace\"}[1m])) * 100",
+          "legendFormat": "canary traffic %"
+        }
+      ]
+    },
+    {
+      "title": "Rollout Status",
+      "description": "Pod count per ReplicaSet — keliatan split stable vs canary",
+      "type": "stat",
+      "gridPos": { "x": 8, "y": 16, "w": 8, "h": 6 },
+      "targets": [
+        {
+          "expr": "kube_replicaset_status_ready_replicas{namespace=\"$namespace\"} > 0",
+          "legendFormat": "{{replicaset}}"
+        }
+      ]
+    },
+    {
+      "title": "AnalysisRun Status",
+      "description": "Pass/Fail dari AnalysisTemplate query — ini yang decide rollback atau lanjut",
+      "type": "logs",
+      "gridPos": { "x": 16, "y": 16, "w": 8, "h": 6 },
+      "targets": [
+        {
+          "expr": "kube_customresource_info{kind=\"AnalysisRun\", namespace=\"$namespace\"}",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    }
+  ]
+}

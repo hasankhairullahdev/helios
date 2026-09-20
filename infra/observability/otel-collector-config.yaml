@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: monitoring
+data:
+  config.yaml: |
+    # ============================================================
+    # RECEIVERS — cara collector menerima data dari services
+    # ============================================================
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317   # gRPC — dipakai oleh .NET OTel SDK
+          http:
+            endpoint: 0.0.0.0:4318   # HTTP — alternatif untuk browser/mobile
+
+    # ============================================================
+    # PROCESSORS — transform/filter data sebelum di-export
+    # ============================================================
+    processors:
+      # Batch processor: kumpulkan data dulu, kirim sekaligus
+      # Lebih efisien daripada kirim satu-satu
+      batch:
+        timeout: 5s
+        send_batch_size: 1024
+
+      # Memory limiter: jaga agar collector tidak OOM
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 256
+
+      # Resource detector: tambah metadata (cluster name, namespace, dll)
+      resourcedetection:
+        detectors: [env, system]
+
+    # ============================================================
+    # EXPORTERS — kirim data ke backend
+    # ============================================================
+    exporters:
+      # Prometheus exporter — expose /metrics endpoint
+      # Prometheus server akan scrape endpoint ini
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: helios
+        # Tambah label ini ke semua metrics — berguna untuk filter di Grafana
+        const_labels:
+          cluster: helios-local
+
+      # Debug exporter — log semua data ke stdout (untuk troubleshooting)
+      # MATIKAN di production untuk hemat resource
+      debug:
+        verbosity: basic
+
+      # OTLP exporter untuk traces ke Tempo
+      # Uncomment kalau Tempo sudah di-deploy
+      # otlp/tempo:
+      #   endpoint: http://tempo:4317
+      #   tls:
+      #     insecure: true
+
+    # ============================================================
+    # PIPELINES — hubungkan receiver → processor → exporter
+    # ============================================================
+    service:
+      pipelines:
+        # Metrics pipeline: terima dari services → batch → export ke Prometheus
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resourcedetection]
+          exporters: [prometheus, debug]
+
+        # Traces pipeline: terima dari services → batch → debug log
+        # (Nanti tambah otlp/tempo exporter di sini)
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resourcedetection]
+          exporters: [debug]
+
+        # Logs pipeline
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
