@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: traffic-generator
-  namespace: task-service-staging
+  namespace: helios-staging
   labels:
     app: traffic-generator
     phase: chaos-demo
@@ -32,7 +32,7 @@ spec:
                   -X POST \
                   -H "Content-Type: application/json" \
                   -d "{\"title\": \"chaos-task-${i}\"}" \
-                  http://task-service.task-service-staging.svc.cluster.local/tasks)
+                  http://task-service-staging-task-service.helios-staging.svc.cluster.local/tasks)
                 if [ "$HTTP_CODE" = "201" ]; then
                   SUCCESS=$((SUCCESS + 1))
                 else
