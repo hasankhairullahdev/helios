@@ -28,3 +28,6 @@ Thumbs.db
 # Helm
 infra/helm/**/charts/
 infra/helm/**/*.lock
+
+# Danantara — client project, tidak masuk repo Helios
+danantara/
