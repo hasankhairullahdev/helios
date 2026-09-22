@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: traffic-generator
+  namespace: task-service-staging
+  labels:
+    app: traffic-generator
+    phase: chaos-demo
+spec:
+  # Jangan otomatis cleanup — biar kita bisa lihat status dan log setelah selesai
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: traffic-generator
+          # curl tersedia di alpine/curl image — minimal, tidak butuh setup
+          image: curlimages/curl:8.11.1
+          # Kirim 300 request POST /tasks ke task-service, satu per detik.
+          # Dengan bug chaos (setiap ke-3 return 500), error rate ~33%.
+          # AnalysisTemplate threshold: 1% — jadi auto-abort akan terpicu
+          # dalam beberapa menit pertama canary.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Starting traffic generator — 300 requests at 1 req/sec"
+              SUCCESS=0
+              FAIL=0
+              for i in $(seq 1 300); do
+                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -X POST \
+                  -H "Content-Type: application/json" \
+                  -d "{\"title\": \"chaos-task-${i}\"}" \
+                  http://task-service.task-service-staging.svc.cluster.local/tasks)
+                if [ "$HTTP_CODE" = "201" ]; then
+                  SUCCESS=$((SUCCESS + 1))
+                else
+                  FAIL=$((FAIL + 1))
+                  echo "Request $i FAILED with HTTP $HTTP_CODE"
+                fi
+                sleep 1
+              done
+              echo "Done. Success: $SUCCESS / Fail: $FAIL / Total: 300"
+              # Exit 0 selalu — kita tidak mau Job ini fail dan bikin noise.
+              # Yang penting data sudah masuk ke Prometheus via service metrics.
+              exit 0
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"

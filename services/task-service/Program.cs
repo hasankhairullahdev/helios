@@ -101,6 +101,14 @@ using (var scope = app.Services.CreateScope())
 }
 
 // ============================================================
+// CHAOS INJECTION — Phase 8 demo
+// ============================================================
+// Setiap request ke-3 ke POST /tasks akan return 500.
+// Error rate ~33% — jauh di atas threshold 1% di AnalysisTemplate.
+// ⚠️  HAPUS BLOK INI setelah chaos demo selesai direkam.
+var chaosCounter = 0;
+
+// ============================================================
 // RABBITMQ PUBLISHER
 // ============================================================
 // Dibuat setelah app.Build() karena butuh config yang sudah siap.
@@ -163,8 +171,20 @@ app.MapGet("/tasks/{id}", async (int id, AppDbContext db) =>
         : Results.NotFound());
 
 // POST /tasks — buat task baru + publish event TaskCreated
+// ⚠️  CHAOS: setiap request ke-3 return 500 (Phase 8 demo — hapus setelah demo)
 app.MapPost("/tasks", async (CreateTaskRequest req, AppDbContext db) =>
 {
+    var count = Interlocked.Increment(ref chaosCounter);
+    if (count % 3 == 0)
+    {
+        Log.Warning("CHAOS: injecting 500 error on POST /tasks (request #{Count})", count);
+        return Results.Problem(
+            title: "chaos injection",
+            detail: "Simulated failure for canary analysis demo",
+            statusCode: StatusCodes.Status500InternalServerError
+        );
+    }
+
     var task = new TaskItem { Title = req.Title };
     db.Tasks.Add(task);
     await db.SaveChangesAsync();
